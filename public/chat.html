@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Bikash Claude</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="sidebar">
+        <h2 style="color: var(--primary); margin-bottom: 30px;">Bikash Claude</h2>
+        <button class="btn" onclick="startNewChat()">+ New Chat</button>
+        <div style="margin-top: auto;">
+            <div id="userInfo" style="margin-bottom: 15px; font-size: 14px; color: #aaa;"></div>
+            <button class="btn" style="width: 100%; background: #333; color: white;" onclick="logout()">Logout / Switch</button>
+        </div>
+    </div>
+
+    <div class="chat-container">
+        <header>
+            <div>
+                <strong>Model:</strong> Mistral-7B-Instruct
+            </div>
+            <div>
+                <select id="personality" class="personality-select">
+                    <option value="friendly">🤖 Friendly AI</option>
+                    <option value="hacker">💻 Hacker Mode</option>
+                    <option value="teacher">📚 Teacher Mode</option>
+                </select>
+            </div>
+        </header>
+
+        <div class="chat-log" id="chatLog">
+            <div class="message msg-ai">
+                Hello! I am <strong>Bikash Claude</strong>. How can I assist you today?
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-wrapper glass-panel">
+                <button class="icon-btn" onclick="toggleVoice()" title="Voice Input">🎤</button>
+                <button class="icon-btn" onclick="alert('File upload coming soon!')" title="Upload">📎</button>
+                <input type="text" id="userInput" placeholder="Ask Bikash Claude anything..." onkeypress="handleEnter(event)">
+                <button class="icon-btn" onclick="sendMessage()" style="color: var(--primary);">➤</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const user = JSON.parse(localStorage.getItem('bc_user'));
+        if (!user) window.location.href = 'login.html';
+        document.getElementById('userInfo').innerText = `👤 ${user.email}`;
+
+        let chatHistory = [];
+        const chatLog = document.getElementById('chatLog');
+        const input = document.getElementById('userInput');
+
+        // Web Speech API for STT
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+        if(recognition) {
+            recognition.onresult = (e) => { input.value = e.results[0][0].transcript; };
+        }
+
+        function toggleVoice() {
+            if(!recognition) return alert("Voice not supported in this browser.");
+            recognition.start();
+            input.placeholder = "Listening...";
+            recognition.onend = () => input.placeholder = "Ask Bikash Claude anything...";
+        }
+
+        // TTS
+        function speak(text) {
+            const cleanText = text.replace(/[*#`]/g, ''); // strip markdown
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+            speechSynthesis.speak(utterance);
+        }
+
+        function handleEnter(e) { if (e.key === 'Enter') sendMessage(); }
+        function startNewChat() { chatLog.innerHTML = '<div class="message msg-ai">Hello! I am Bikash Claude. How can I assist you today?</div>'; chatHistory = []; }
+        function logout() { localStorage.removeItem('bc_user'); window.location.href = 'login.html'; }
+
+        async function sendMessage() {
+            const msg = input.value.trim();
+            if (!msg) return;
+            
+            // Append User Message
+            appendMessage('user', msg);
+            chatHistory.push({ role: 'user', content: msg });
+            input.value = '';
+
+            // AI Loading state
+            const aiMsgDiv = appendMessage('ai', '<span class="typing">Bikash Claude is thinking...</span>');
+            
+            try {
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        message: msg, 
+                        userId: user.id, 
+                        personality: document.getElementById('personality').value,
+                        history: chatHistory 
+                    })
+                });
+                
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
+                chatHistory.push({ role: 'assistant', content: data.reply });
+                
+                // Streaming effect
+                simulateStreaming(aiMsgDiv, data.reply);
+                
+            } catch (err) {
+                aiMsgDiv.innerHTML = `⚠️ Error: ${err.message}`;
+            }
+        }
+
+        function appendMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `message msg-${role}`;
+            if(role === 'user') {
+                div.innerText = text;
+            } else {
+                div.innerHTML = text; // allow html for initial loading state
+            }
+            chatLog.appendChild(div);
+            chatLog.scrollTop = chatLog.scrollHeight;
+            return div;
+        }
+
+        function simulateStreaming(element, text) {
+            element.innerHTML = '';
+            let i = 0;
+            // Render markdown button container
+            const controls = `<div style="position:absolute; bottom:5px; right:10px;"><button class="icon-btn" style="font-size:14px" onclick="speak(this.parentElement.parentElement.innerText)">🔊</button></div>`;
+            
+            let buffer = '';
+            const interval = setInterval(() => {
+                if (i < text.length) {
+                    buffer += text.charAt(i);
+                    element.innerHTML = marked.parse(buffer);
+                    chatLog.scrollTop = chatLog.scrollHeight;
+                    i++;
+                } else {
+                    clearInterval(interval);
+                    element.innerHTML += controls;
+                    addCopyButtons(element);
+                }
+            }, 10); // Streaming speed
+        }
+
+        function addCopyButtons(element) {
+            const blocks = element.querySelectorAll('pre');
+            blocks.forEach(block => {
+                const btn = document.createElement('button');
+                btn.className = 'copy-btn';
+                btn.innerText = 'Copy';
+                btn.onclick = () => {
+                    navigator.clipboard.writeText(block.innerText.replace('Copy',''));
+                    btn.innerText = 'Copied!';
+                    setTimeout(() => btn.innerText = 'Copy', 2000);
+                };
+                block.appendChild(btn);
+            });
+        }
+    </script>
+</body>
+</html>
